@@ -2,7 +2,7 @@ import puppeteer from "puppeteer";
 import { bypassLootLabsFromHtml } from "/opt/bypass-delta/lib/lootlink.js";
 
 const MAX_ROUNDS = 4;
-const LAUNCH_ARGS = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--window-size=1280,800"];
+const LAUNCH_ARGS = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--window-size=1280,800", "--disable-popup-blocking"];
 const VIEWPORT = { width: 1280, height: 800 };
 
 const LOOT_MARK = /lootlabs|loot\.link|work\.ink|boost\.ink|linkvertise|admaven/i;
@@ -37,6 +37,20 @@ async function openTicketPage(browser, ticket, log) {
   } catch (e) {
     log("goto err", String(e).slice(0, 120));
   }
+  page.on("request", (r) => {
+    const u = r.url();
+    if (/platorelay\.com\/api\//.test(u)) {
+      let body = "";
+      try { body = r.postData() || ""; } catch (e) {}
+      log("SPA_API", r.method(), u.replace("https://auth.platorelay.com", "").slice(0, 130), body ? " " + body.slice(0, 700) : "");
+    }
+  });
+  page.on("response", (r) => {
+    const u = r.url();
+    if (/platorelay\.com\/api\//.test(u)) {
+      r.text().then((t) => log("SPA_RESP", r.status(), u.replace("https://auth.platorelay.com", "").slice(0, 100), " ", t.slice(0, 900))).catch(() => {});
+    }
+  });
   for (let i = 0; i < 10; i++) {
     await new Promise((r) => setTimeout(r, 1500));
     const len = await getUiLen(page, log);
@@ -108,6 +122,22 @@ async function runLootLiveThenWs(browser, lootUrl, html, log) {
   const page = await browser.newPage();
   page.setDefaultNavigationTimeout(60000);
   try {
+    const onApiReq = (r) => {
+      const u = r.url();
+      if (/unlockr|curyrent|nerventualken|onsultingco|ptr\?/.test(u) && !/\.(js|css|png|jpg|svg|woff)/.test(u)) {
+        let body = "";
+        try { body = r.postData() || ""; } catch (e) {}
+        log("LOOT_API_REQ", r.method(), u.slice(0, 150), body ? " " + body.slice(0, 500) : "");
+      }
+    };
+    const onApiRes = (r) => {
+      const u = r.url();
+      if (/unlockr|curyrent|nerventualken|onsultingco|ptr\?/.test(u) && !/\.(js|css|png|jpg|svg|woff)/.test(u)) {
+        r.text().then((t) => log("LOOT_API_RESP", r.status(), u.slice(0, 120), " ", t.slice(0, 600))).catch(() => {});
+      }
+    };
+    page.on("request", onApiReq);
+    page.on("response", onApiRes);
     await page.goto(lootUrl.replace(/&amp;/g, "&"), { waitUntil: "domcontentloaded", timeout: 60000 });
     const deadline = Date.now() + 240000;
     const tLoopStart = Date.now();
